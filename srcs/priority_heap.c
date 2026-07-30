@@ -23,17 +23,16 @@ static void	heap_swap(t_waiter *a, t_waiter *b)
 }
 
 /* Compare two waiters: lower priority first, then tie, then ticket. */
-static int	heap_is_less(t_waiter a, t_waiter b)
+static int	heap_is_less(t_waiter c, t_waiter p)
 {
-	if (a.priority < b.priority)
+	if (c.priority < p.priority)
 		return (1);
-	if (a.priority > b.priority)
+	if (c.priority > p.priority)
 		return (0);
-	if (a.tie < b.tie)
+	if (c.tie < p.tie)
 		return (1);
-	if (a.tie > b.tie)
+	if (c.tie > p.tie)
 		return (0);
-	return (a.ticket < b.ticket);
 }
 
 /* Insert one waiter into the heap and restore heap order (sift-up). */

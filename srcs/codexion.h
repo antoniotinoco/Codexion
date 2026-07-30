@@ -94,13 +94,13 @@ typedef struct s_sim
 	pthread_cond_t	start_cond;		/* start barrier */
 	pthread_cond_t	dongle_cond;
 	pthread_t		monitor;
-	
+
 	int				start_released;
 
 	int				mutexes_ready;	/* were the 3 mutexes above init'd? */
 	int				dongles_ready;	/* how many dongle mutexes init'd */
 	int				start_aborted;
-	
+
 	t_request		*requests;		/* one per coder */
 	t_waiter		**dongle_heaps;	/* one heap array per dongle */
 	int				*heap_sizes;	/* one size counter per dongle */

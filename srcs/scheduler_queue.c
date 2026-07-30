@@ -82,6 +82,7 @@ void	scheduler_clear_wait(t_sim *sim, t_coder *coder)
 	pthread_mutex_unlock(&sim->sim_lock);
 }
 
+/* Is this coder currently at the top of this dongle's priority queue? */
 /* Caller must already hold sim->sim_lock. */
 int	scheduler_is_selected(t_sim *sim, t_dongle *dongle, t_coder *coder)
 {

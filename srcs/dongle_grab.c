@@ -18,12 +18,12 @@
 /* wakes us immediately whenever a dongle becomes free. */
 void	dongle_cond_wait(t_sim *sim)
 {
-	struct 			timespec	ts;
+	struct timespec	ts;
 	long long		target;
 
 	target = current_time_ms() + 5;
 	ts.tv_sec = (time_t)(target / 1000);
-	ts.tv_nsec = (long)(target % 1000) * 1000000L;
+	ts.tv_nsec = (long)((target % 1000) * 1000000L);
 	pthread_mutex_lock(&sim->sim_lock);
 	pthread_cond_timedwait(&sim->dongle_cond, &sim->sim_lock, &ts);
 	pthread_mutex_unlock(&sim->sim_lock);
@@ -85,4 +85,16 @@ int	acquire_both_dongles(t_sim *sim, t_coder *coder, t_dongle *f,
 	}
 	scheduler_clear_wait(sim, coder);
 	return (0);
+}
+
+/* Release one dongle: mark it free and apply its cooldown. */
+void	release_dongle(t_sim *sim, t_dongle *dongle)
+{
+	pthread_mutex_lock(&dongle->lock);
+	dongle->is_taken = 0;
+	dongle->available_at_ms = current_time_ms() + sim->config.dongle_cooldown;
+	pthread_mutex_unlock(&dongle->lock);
+	pthread_mutex_lock(&sim->sim_lock);
+	pthread_cond_broadcast(&sim->dongle_cond);
+	pthread_mutex_unlock(&sim->sim_lock);
 }
