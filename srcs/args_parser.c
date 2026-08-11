@@ -5,19 +5,15 @@
 /*                                                    +:+ +:+         +:+     */
 /*   By: atinoco- <atinoco-@student.42lisboa.com    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/07/21 12:32:28 by atinoco-          #+#    #+#             */
-/*   Updated: 2026/07/21 12:32:28 by atinoco-         ###   ########.fr       */
+/*   Created: 2026/07/22 01:32:28 by atinoco-          #+#    #+#             */
+/*   Updated: 2026/07/23 12:33:56 by atinoco-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "codexion.h"
-#include <string.h>
-#include <stdio.h>
-#include <limits.h>
 
-/* Convert a numeric string to a positive long. */
-/* No atoi: atoi can't report errors on bad input or overflow. */
-static int	parse_positive_long(char *str, long long *out)
+/* Convert a numeric string to a positive long long. */
+static int	parse_positive_llong(char *str, long long *out)
 {
 	long long	result;
 
@@ -45,9 +41,9 @@ static int	parse_positive_long(char *str, long long *out)
 static int	set_scheduler(t_sim *sim, char *str)
 {
 	if (strcmp(str, "fifo") == 0)
-		sim->config.scheduler = SCHED_FIFO;
+		sim->config.scheduler = SCHED_POLICY_FIFO;
 	else if (strcmp(str, "edf") == 0)
-		sim->config.scheduler = SCHED_EDF;
+		sim->config.scheduler = SCHED_POLICY_EDF;
 	else
 		return (printf("Error: scheduler must be fifo or edf\n"), 0);
 	return (1);

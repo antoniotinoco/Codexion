@@ -5,13 +5,12 @@
 /*                                                    +:+ +:+         +:+     */
 /*   By: atinoco- <atinoco-@student.42lisboa.com    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/07/30 00:34:29 by atinoco-          #+#    #+#             */
-/*   Updated: 2026/07/30 00:34:29 by atinoco-         ###   ########.fr       */
+/*   Created: 2026/08/10 00:34:29 by atinoco-          #+#    #+#             */
+/*   Updated: 2026/08/10 23:15:12 by atinoco-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "codexion.h"
-#include <unistd.h>
 
 /* Find a burned-out coder without modifying simulation state. */
 /* Caller must hold sim->sim_lock. */
@@ -23,6 +22,12 @@ static int	find_burned_coder(t_sim *sim, long long now)
 	i = 0;
 	while (i < sim->config.num_coders)
 	{
+		if (sim->coders[i].compiles_done
+			>= sim->config.compiles_required)
+		{
+			i++;
+			continue ;
+		}
 		elapsed = now - sim->coders[i].last_compile_start;
 		if (elapsed > sim->config.time_to_burnout)
 			return (sim->coders[i].id);
@@ -74,6 +79,7 @@ static int	goal_reached_locked(t_sim *sim)
 static int	check_goal_complete(t_sim *sim)
 {
 	int	done;
+	int	i;
 
 	pthread_mutex_lock(&sim->sim_lock);
 	if (!sim->running)
@@ -86,7 +92,16 @@ static int	check_goal_complete(t_sim *sim)
 		sim->running = 0;
 	pthread_mutex_unlock(&sim->sim_lock);
 	if (done)
-		pthread_cond_broadcast(&sim->dongle_cond);
+	{
+		i = 0;
+		while (i < sim->config.num_coders)
+		{
+			pthread_mutex_lock(&sim->dongles[i].lock);
+			pthread_cond_broadcast(&sim->dongles[i].cond);
+			pthread_mutex_unlock(&sim->dongles[i].lock);
+			i++;
+		}
+	}
 	return (done);
 }
 
@@ -104,7 +119,7 @@ void	*watchdog_run(void *arg)
 		return (NULL);
 	while (sim_is_running(sim))
 	{
-		if (detect_burnout(sim) || check_goal_complete(sim))
+		if (check_goal_complete(sim) || detect_burnout(sim))
 			break ;
 		usleep(2000);
 	}

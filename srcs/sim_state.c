@@ -5,14 +5,12 @@
 /*                                                    +:+ +:+         +:+     */
 /*   By: atinoco- <atinoco-@student.42lisboa.com    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/07/23 23:48:04 by atinoco-          #+#    #+#             */
-/*   Updated: 2026/07/23 23:48:04 by atinoco-         ###   ########.fr       */
+/*   Created: 2026/07/25 09:48:04 by atinoco-          #+#    #+#             */
+/*   Updated: 2026/08/05 14:14:55 by atinoco-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "codexion.h"
-#include <unistd.h>
-#include <sys/time.h>
 
 /* Current time in milliseconds since an arbitrary fixed point. */
 long long	current_time_ms(void)
@@ -38,10 +36,12 @@ int	sim_is_running(t_sim *sim)
 /* Goal / burnout detection is fully owned by the monitor thread. */
 int	coder_should_continue(t_coder *coder)
 {
+	if (coder->compiles_done >= coder->sim->config.compiles_required)
+		return (0);
 	return (sim_is_running(coder->sim));
 }
 
-/* Record a finished compile: bump the counter, reset the deadline. */
+/* Record a finished compile. */
 void	update_compile_state(t_coder *coder, t_sim *sim)
 {
 	pthread_mutex_lock(&sim->sim_lock);

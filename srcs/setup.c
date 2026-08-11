@@ -5,49 +5,77 @@
 /*                                                    +:+ +:+         +:+     */
 /*   By: atinoco- <atinoco-@student.42lisboa.com    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/07/21 10:45:11 by atinoco-          #+#    #+#             */
-/*   Updated: 2026/07/21 10:45:11 by atinoco-         ###   ########.fr       */
+/*   Created: 2026/07/22 10:45:11 by atinoco-          #+#    #+#             */
+/*   Updated: 2026/07/23 13:55:01 by atinoco-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "codexion.h"
-#include <string.h>
-#include <stdlib.h>
 
-/* Free every heap-allocated array in t_sim. */
-void	free_sim_arrays(t_sim *sim)
+/* Initialize one coder. */
+static void	init_one_coder(t_sim *sim, int i)
+{
+	sim->coders[i].id = i + 1;
+	sim->coders[i].compiles_done = 0;
+	sim->coders[i].last_compile_start = 0;
+	sim->coders[i].arrival_time = 0;
+	sim->coders[i].thread_created = 0;
+	sim->coders[i].left = &sim->dongles[i];
+	sim->coders[i].right = &sim->dongles[(i + 1) % sim->config.num_coders];
+	sim->coders[i].sim = sim;
+}
+
+/* Initialize coders and dongles. */
+static int	init_coders_and_dongles(t_sim *sim)
 {
 	int	i;
 
-	free(sim->coders);
-	free(sim->dongles);
-	free(sim->requests);
-	if (sim->dongle_heaps)
+	i = 0;
+	while (i < sim->config.num_coders)
 	{
-		i = 0;
-		while (i < sim->config.num_coders)
-			free(sim->dongle_heaps[i++]);
+		init_one_coder(sim, i);
+		sim->dongles[i].id = i + 1;
+		sim->dongles[i].available = 1;
+		sim->dongles[i].timestamp = 0;
+		sim->dongles[i].queue_size = 0;
+		if (pthread_mutex_init(&sim->dongles[i].lock, NULL) != 0)
+			return (0);
+		if (pthread_cond_init(&sim->dongles[i].cond, NULL) != 0)
+		{
+			pthread_mutex_destroy(&sim->dongles[i].lock);
+			return (0);
+		}
+		sim->dongles_ready++;
+		i++;
 	}
-	free(sim->dongle_heaps);
-	free(sim->heap_sizes);
-	sim->coders = NULL;
-	sim->dongles = NULL;
-	sim->requests = NULL;
-	sim->dongle_heaps = NULL;
-	sim->heap_sizes = NULL;
+	return (1);
 }
 
-/* Undo whatever init_sim_sync / init_coders_and_dongles did. */
-static void	cleanup_partial_setup(t_sim *sim)
+/* Init the simulation mutexes. Rolls back on partial failure. */
+static int	init_sim_sync(t_sim *sim)
 {
-	if (sim->dongles_ready > 0)
-		destroy_dongle_locks(sim, sim->dongles_ready);
-	if (sim->mutexes_ready)
-		destroy_sim_sync(sim);
-	free_sim_arrays(sim);
+	if (pthread_mutex_init(&sim->sim_lock, NULL) != 0)
+		return (0);
+	if (pthread_mutex_init(&sim->log_lock, NULL) != 0)
+		return (pthread_mutex_destroy(&sim->sim_lock), 0);
+	if (pthread_mutex_init(&sim->start_lock, NULL) != 0)
+	{
+		pthread_mutex_destroy(&sim->log_lock);
+		pthread_mutex_destroy(&sim->sim_lock);
+		return (0);
+	}
+	if (pthread_cond_init(&sim->start_cond, NULL) != 0)
+	{
+		pthread_mutex_destroy(&sim->start_lock);
+		pthread_mutex_destroy(&sim->log_lock);
+		pthread_mutex_destroy(&sim->sim_lock);
+		return (0);
+	}
+	sim->mutexes_ready = 1;
+	return (1);
 }
 
-/* Allocate coders, dongles, requests, heaps and heap-size arrays. */
+/* Allocate coder and dongle arrays. */
 static int	alloc_sim_arrays(t_sim *sim)
 {
 	int	n;
@@ -55,35 +83,10 @@ static int	alloc_sim_arrays(t_sim *sim)
 	n = sim->config.num_coders;
 	sim->coders = malloc(sizeof(t_coder) * n);
 	sim->dongles = malloc(sizeof(t_dongle) * n);
-	sim->requests = malloc(sizeof(t_request) * n);
-	sim->heap_sizes = malloc(sizeof(int) * n);
-	if (!sim->coders || !sim->dongles || !sim->requests
-		|| !sim->heap_sizes || !alloc_heaps(sim, n))
+	if (!sim->coders || !sim->dongles)
 	{
 		free_sim_arrays(sim);
 		return (0);
-	}
-	return (1);
-}
-
-/* Allocate the per-coder heaps array (one t_waiter array per dongle). */
-static int	alloc_heaps(t_sim *sim, int n)
-{
-	int	i;
-
-	sim->dongle_heaps = malloc(sizeof(t_waiter *) * n);
-	if (!sim->dongle_heaps)
-		return (0);
-	i = 0;
-	while (i < n)
-		sim->dongle_heaps[i++] = NULL;
-	i = 0;
-	while (i < n)
-	{
-		sim->dongle_heaps[i] = malloc(sizeof(t_waiter) * n);
-		if (!sim->dongle_heaps[i])
-			return (0);
-		i++;
 	}
 	return (1);
 }

@@ -5,8 +5,8 @@
 /*                                                    +:+ +:+         +:+     */
 /*   By: atinoco- <atinoco-@student.42lisboa.com    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/07/21 23:44:37 by atinoco-          #+#    #+#             */
-/*   Updated: 2026/07/21 23:44:37 by atinoco-         ###   ########.fr       */
+/*   Created: 2026/07/24 23:44:37 by atinoco-          #+#    #+#             */
+/*   Updated: 2026/08/04 13:11:23 by atinoco-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -26,21 +26,38 @@ static void	*coder_entry(void *arg)
 	pthread_mutex_unlock(&sim->start_lock);
 	if (sim->start_aborted)
 		return (NULL);
+	pthread_mutex_lock(&sim->start_lock);
+	sim->registered_coders++;
+	if (sim->registered_coders == sim->config.num_coders)
+		pthread_cond_broadcast(&sim->start_cond);
+	else
+	{
+		while (sim->registered_coders < sim->config.num_coders)
+			pthread_cond_wait(&sim->start_cond, &sim->start_lock);
+	}
+	pthread_mutex_unlock(&sim->start_lock);
 	return (coder_loop_run(coder));
 }
 
-/* Create all coder threads, tracking progress for cleanup. */
+/* Create a thread to each coder, tracking progress for cleanup. */
 static int	spawn_coders(t_sim *sim)
 {
 	int	i;
+	int	ret;
 
 	i = 0;
 	while (i < sim->config.num_coders)
 	{
 		sim->coders[i].sim = sim;
-		if (pthread_create(&sim->coders[i].thread, NULL,
-				coder_entry, &sim->coders[i]) != 0)
+		ret = pthread_create(&sim->coders[i].thread, NULL,
+				coder_entry, &sim->coders[i]);
+		if (ret != 0)
+		{
+			fprintf(stderr,
+				"Error: failed to create thread %d (pthread_create: %d)\n",
+				i + 1, ret);
 			return (0);
+		}
 		sim->coders[i].thread_created = 1;
 		sim->threads_created++;
 		i++;

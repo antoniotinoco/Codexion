@@ -5,93 +5,100 @@
 /*                                                    +:+ +:+         +:+     */
 /*   By: atinoco- <atinoco-@student.42lisboa.com    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/07/27 01:54:49 by atinoco-          #+#    #+#             */
-/*   Updated: 2026/07/27 01:54:49 by atinoco-         ###   ########.fr       */
+/*   Created: 2026/07/27 17:44:35 by atinoco-          #+#    #+#             */
+/*   Updated: 2026/08/07 01:54:49 by atinoco-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "codexion.h"
 
-/* Rebuild the waiting-heap for one dongle from scratch. */
-static void	rebuild_heap_locked(t_sim *sim, t_dongle *dongle)
+/* Insert a waiting coder according to FIFO ordering. */
+static void	enqueue_fifo(t_dongle *dongle, t_coder *coder)
 {
-	t_waiter	waiter;
-	int			idx;
-	int			i;
+	t_request	tmp;
 
-	idx = dongle->id - 1;
-	sim->heap_sizes[idx] = 0;
-	i = 0;
-	while (i < sim->config.num_coders)
+	dongle->queue[dongle->queue_size].coder_id = coder->id;
+	dongle->queue[dongle->queue_size].arrival_time = coder->arrival_time;
+	dongle->queue_size++;
+	if (dongle->queue_size == 2
+		&& dongle->queue[0].arrival_time > dongle->queue[1].arrival_time)
 	{
-		if (sim->requests[i].ticket != 0
-			&& (sim->requests[i].first == dongle
-				|| sim->requests[i].second == dongle))
-		{
-			waiter.coder_idx = i;
-			waiter.ticket = sim->requests[i].ticket;
-			if (sim->config.scheduler == SCHED_FIFO)
-				waiter.priority = waiter.ticket;
-			else
-				waiter.priority = sim->coders[i].last_compile_start
-					+ sim->config.time_to_burnout;
-			waiter.tie = waiter.ticket;
-			heap_push(sim->dongle_heaps[idx], &sim->heap_sizes[idx], waiter);
-		}
-		i++;
+		tmp = dongle->queue[0];
+		dongle->queue[0] = dongle->queue[1];
+		dongle->queue[1] = tmp;
 	}
 }
 
-/* Register one coder as waiting for a pair of dongles. */
-void	scheduler_register_wait(t_sim *sim, t_coder *coder, t_dongle *f,
-		t_dongle *s)
+/* Insert a waiting coder according to EDF ordering. */
+static void	enqueue_edf(t_dongle *dongle, t_coder *coder)
 {
-	int	idx;
+	t_request	tmp;
+	long long	deadline;
 
-	idx = coder->id - 1;
-	pthread_mutex_lock(&sim->sim_lock);
-	if (sim->requests[idx].ticket == 0)
-		sim->requests[idx].ticket = ++sim->next_ticket;
-	sim->requests[idx].first = f;
-	sim->requests[idx].second = s;
-	rebuild_heap_locked(sim, f);
-	if (s != f)
-		rebuild_heap_locked(sim, s);
-	pthread_mutex_unlock(&sim->sim_lock);
+	pthread_mutex_lock(&coder->sim->sim_lock);
+	deadline = coder->last_compile_start
+		+ coder->sim->config.time_to_burnout;
+	pthread_mutex_unlock(&coder->sim->sim_lock);
+	dongle->queue[dongle->queue_size].coder_id = coder->id;
+	dongle->queue[dongle->queue_size].deadline = deadline;
+	dongle->queue_size++;
+	if (dongle->queue_size == 2)
+	{
+		if (dongle->queue[0].deadline > dongle->queue[1].deadline
+			|| (dongle->queue[0].deadline
+				== dongle->queue[1].deadline
+				&& dongle->queue[0].coder_id
+				> dongle->queue[1].coder_id))
+		{
+			tmp = dongle->queue[0];
+			dongle->queue[0] = dongle->queue[1];
+			dongle->queue[1] = tmp;
+		}
+	}
 }
 
-/* Clear one coder's wait request and reset its ticket. */
-void	scheduler_clear_wait(t_sim *sim, t_coder *coder)
+/* Insert one waiting coder into this dongle's queue. */
+void	enqueue(t_dongle *dongle, t_coder *coder)
 {
-	int			idx;
-	t_dongle	*f;
-	t_dongle	*s;
-
-	idx = coder->id - 1;
-	pthread_mutex_lock(&sim->sim_lock);
-	f = sim->requests[idx].first;
-	s = sim->requests[idx].second;
-	sim->requests[idx].first = NULL;
-	sim->requests[idx].second = NULL;
-	sim->requests[idx].ticket = 0;
-	if (f)
-		rebuild_heap_locked(sim, f);
-	if (s && s != f)
-		rebuild_heap_locked(sim, s);
-	pthread_cond_broadcast(&sim->dongle_cond);
-	pthread_mutex_unlock(&sim->sim_lock);
+	if (coder->sim->config.scheduler == SCHED_POLICY_FIFO)
+		enqueue_fifo(dongle, coder);
+	else
+		enqueue_edf(dongle, coder);
 }
 
-/* Is this coder currently at the top of this dongle's priority queue? */
-/* Caller must already hold sim->sim_lock. */
-int	scheduler_is_selected(t_sim *sim, t_dongle *dongle, t_coder *coder)
+/* Remove the front request from the queue. */
+void	dequeue(t_dongle *dongle)
 {
-	int	idx;
-	int	best;
+	if (dongle->queue_size <= 0)
+		return ;
+	dongle->queue[0] = dongle->queue[1];
+	dongle->queue_size--;
+}
 
-	idx = dongle->id - 1;
-	if (sim->heap_sizes[idx] == 0)
-		return (0);
-	best = heap_peek(sim->dongle_heaps[idx], sim->heap_sizes[idx]).coder_idx;
-	return (best == coder->id - 1);
+/* Wait until this dongle is granted to this coder. */
+void	wait_for_dongle(t_dongle *dongle, t_coder *coder)
+{
+	pthread_mutex_lock(&dongle->lock);
+	enqueue(dongle, coder);
+	while ((!dongle->available
+			|| dongle->queue[0].coder_id != coder->id)
+		&& sim_is_running(coder->sim))
+		pthread_cond_wait(&dongle->cond, &dongle->lock);
+	if (!sim_is_running(coder->sim))
+	{
+		dequeue(dongle);
+		pthread_mutex_unlock(&dongle->lock);
+		return ;
+	}
+	while (current_time_ms() - dongle->timestamp
+		< coder->sim->config.dongle_cooldown
+		&& sim_is_running(coder->sim))
+	{
+		pthread_mutex_unlock(&dongle->lock);
+		usleep(100);
+		pthread_mutex_lock(&dongle->lock);
+	}
+	dongle->available = 0;
+	dequeue(dongle);
+	pthread_mutex_unlock(&dongle->lock);
 }

@@ -5,96 +5,52 @@
 /*                                                    +:+ +:+         +:+     */
 /*   By: atinoco- <atinoco-@student.42lisboa.com    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/07/24 10:48:26 by atinoco-          #+#    #+#             */
-/*   Updated: 2026/07/24 10:48:26 by atinoco-         ###   ########.fr       */
+/*   Created: 2026/07/27 10:48:26 by atinoco-          #+#    #+#             */
+/*   Updated: 2026/08/09 22:17:04 by atinoco-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "codexion.h"
-#include <sys/time.h>
 
-/* Wait for a dongle-release event or up to 5ms, whichever is first. Bounded 
-/* wait keeps us responsive to stop/burnout, while pthread_cond_broadcast 
-/* wakes us immediately whenever a dongle becomes free. */
-void	dongle_cond_wait(t_sim *sim)
+/* Take left then right dongle. */
+void	take_left_first(t_coder *coder)
 {
-	struct timespec	ts;
-	long long		target;
-
-	target = current_time_ms() + 5;
-	ts.tv_sec = (time_t)(target / 1000);
-	ts.tv_nsec = (long)((target % 1000) * 1000000L);
-	pthread_mutex_lock(&sim->sim_lock);
-	pthread_cond_timedwait(&sim->dongle_cond, &sim->sim_lock, &ts);
-	pthread_mutex_unlock(&sim->sim_lock);
+	coder->arrival_time = current_time_ms();
+	wait_for_dongle(coder->left, coder);
+	if (!coder_should_continue(coder))
+		return ;
+	log_state(coder->sim, coder->id, "has taken a dongle");
+	wait_for_dongle(coder->right, coder);
+	if (!coder_should_continue(coder))
+		return ;
+	log_state(coder->sim, coder->id, "has taken a dongle");
 }
 
-/* True only if both dongles are free AND the scheduler currently */
-/* picks this coder as the rightful next holder for both of them. */
-/* Caller must hold f->lock, s->lock, and sim->sim_lock. */
-static int	pair_ready(t_coder *coder, t_sim *sim, t_dongle *f, t_dongle *s)
+/* Take right then left dongle. */
+void	take_right_first(t_coder *coder)
 {
-	long long	now;
-
-	if (!sim->running)
-		return (0);
-	if (f->is_taken || s->is_taken)
-		return (0);
-	now = current_time_ms();
-	if (now < f->available_at_ms || now < s->available_at_ms)
-		return (0);
-	if (!scheduler_is_selected(sim, f, coder))
-		return (0);
-	return (scheduler_is_selected(sim, s, coder));
+	coder->arrival_time = current_time_ms();
+	wait_for_dongle(coder->right, coder);
+	if (!coder_should_continue(coder))
+		return ;
+	log_state(coder->sim, coder->id, "has taken a dongle");
+	wait_for_dongle(coder->left, coder);
+	if (!coder_should_continue(coder))
+		return ;
+	log_state(coder->sim, coder->id, "has taken a dongle");
 }
 
-/* Single-coder case: only one dongle exists (left == right). */
-/* The coder can never compile; it just waits until burnout. */
-void	single_coder_wait(t_coder *coder, t_sim *sim)
+/* Release both dongles and start their cooldowns. */
+void	release_dongles(t_coder *coder)
 {
-	while (coder_should_continue(coder))
-		dongle_cond_wait(sim);
-}
-
-/* Try to take both dongles atomically; retry until success or stop. */
-int	acquire_both_dongles(t_sim *sim, t_coder *coder, t_dongle *f,
-		t_dongle *s)
-{
-	scheduler_register_wait(sim, coder, f, s);
-	while (sim->running)
-	{
-		pthread_mutex_lock(&f->lock);
-		pthread_mutex_lock(&s->lock);
-		pthread_mutex_lock(&sim->sim_lock);
-		if (pair_ready(coder, sim, f, s))
-		{
-			f->is_taken = 1;
-			s->is_taken = 1;
-			pthread_mutex_unlock(&sim->sim_lock);
-			pthread_mutex_unlock(&s->lock);
-			pthread_mutex_unlock(&f->lock);
-			scheduler_clear_wait(sim, coder);
-			log_state(sim, coder->id, "has taken a dongle");
-			log_state(sim, coder->id, "has taken a dongle");
-			return (1);
-		}
-		pthread_mutex_unlock(&sim->sim_lock);
-		pthread_mutex_unlock(&s->lock);
-		pthread_mutex_unlock(&f->lock);
-		dongle_cond_wait(sim);
-	}
-	scheduler_clear_wait(sim, coder);
-	return (0);
-}
-
-/* Release one dongle: mark it free and apply its cooldown. */
-void	release_dongle(t_sim *sim, t_dongle *dongle)
-{
-	pthread_mutex_lock(&dongle->lock);
-	dongle->is_taken = 0;
-	dongle->available_at_ms = current_time_ms() + sim->config.dongle_cooldown;
-	pthread_mutex_unlock(&dongle->lock);
-	pthread_mutex_lock(&sim->sim_lock);
-	pthread_cond_broadcast(&sim->dongle_cond);
-	pthread_mutex_unlock(&sim->sim_lock);
+	pthread_mutex_lock(&coder->left->lock);
+	coder->left->timestamp = current_time_ms();
+	coder->left->available = 1;
+	pthread_cond_broadcast(&coder->left->cond);
+	pthread_mutex_unlock(&coder->left->lock);
+	pthread_mutex_lock(&coder->right->lock);
+	coder->right->timestamp = current_time_ms();
+	coder->right->available = 1;
+	pthread_cond_broadcast(&coder->right->cond);
+	pthread_mutex_unlock(&coder->right->lock);
 }

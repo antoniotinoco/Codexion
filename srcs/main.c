@@ -5,14 +5,12 @@
 /*                                                    +:+ +:+         +:+     */
 /*   By: atinoco- <atinoco-@student.42lisboa.com    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/07/21 00:21:08 by atinoco-          #+#    #+#             */
-/*   Updated: 2026/07/21 00:21:08 by atinoco-         ###   ########.fr       */
+/*   Created: 2026/07/21 10:11:56 by atinoco-          #+#    #+#             */
+/*   Updated: 2026/07/22 00:21:08 by atinoco-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "codexion.h"
-#include <stdlib.h>
-#include <stdio.h>
 
 int	main(int argc, char **argv)
 {

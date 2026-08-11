@@ -5,8 +5,8 @@
 /*                                                    +:+ +:+         +:+     */
 /*   By: atinoco- <atinoco-@student.42lisboa.com    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/07/22 14:59:36 by atinoco-          #+#    #+#             */
-/*   Updated: 2026/07/22 14:59:36 by atinoco-         ###   ########.fr       */
+/*   Created: 2026/07/24 14:59:36 by atinoco-          #+#    #+#             */
+/*   Updated: 2026/07/25 12:13:13 by atinoco-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -36,15 +36,4 @@ int	thread_manager_join(t_sim *sim)
 		if (pthread_join(sim->monitor, NULL) != 0)
 			return (0);
 	return (1);
-}
-
-/* Destroy sync objects and free simulation memory. Safe to call */
-/* after partial init/start failures at any stage. */
-void	thread_manager_cleanup(t_sim *sim)
-{
-	if (sim->dongles_ready > 0)
-		destroy_dongle_locks(sim, sim->dongles_ready);
-	if (sim->mutexes_ready)
-		destroy_sim_sync(sim);
-	free_sim_arrays(sim);
 }

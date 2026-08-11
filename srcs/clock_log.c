@@ -11,7 +11,6 @@
 /* ************************************************************************** */
 
 #include "codexion.h"
-#include <stdio.h>
 
 /* Print one serialized state line with timestamp and coder id. */
 /* Suppressed once the sim has stopped, except burnout is handled */
@@ -39,6 +38,7 @@ void	log_state(t_sim *sim, int coder_id, const char *state)
 void	log_burnout_and_stop(t_sim *sim, int coder_id)
 {
 	long long	elapsed;
+	int			i;
 
 	pthread_mutex_lock(&sim->log_lock);
 	pthread_mutex_lock(&sim->sim_lock);
@@ -50,9 +50,16 @@ void	log_burnout_and_stop(t_sim *sim, int coder_id)
 	}
 	sim->running = 0;
 	sim->burned_out_id = coder_id;
-	pthread_cond_broadcast(&sim->dongle_cond);
 	elapsed = current_time_ms() - sim->start_time_ms;
 	pthread_mutex_unlock(&sim->sim_lock);
+	i = 0;
+	while (i < sim->config.num_coders)
+	{
+		pthread_mutex_lock(&sim->dongles[i].lock);
+		pthread_cond_broadcast(&sim->dongles[i].cond);
+		pthread_mutex_unlock(&sim->dongles[i].lock);
+		i++;
+	}
 	printf("%lld %d burned out\n", elapsed, coder_id);
 	pthread_mutex_unlock(&sim->log_lock);
 }
