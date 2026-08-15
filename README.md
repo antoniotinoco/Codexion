@@ -83,7 +83,7 @@ The program expects eight user-provided arguments:
 | `time_to_debug` | Duration of the debug phase in milliseconds |
 | `time_to_refactor` | Duration of the refactor phase in milliseconds |
 | `number_of_compiles_required` | Number of compiles required per coder for success |
-| `dongle_cooldown` | Cooldown period after a dongle is released, in milliseconds |
+| `dongle_cooldown` | Cooldown period after a dongle is released, in milliseconds (0 allowed) |
 | `scheduler` | Scheduling policy: `fifo` or `edf` |
 
 Example:
@@ -99,7 +99,7 @@ Quick log check:
 ./codexion 5 1500 200 200 100 5 50 fifo | grep -c "is compiling"
 ```
 
-You can this to quickly check if the total number of compilations has been achieved by all coders.
+You can use this to quickly check if the total number of compilations has been achieved by all coders.
 
 ### Expected log format
 
@@ -136,7 +136,7 @@ At startup, the program:
 
 1. Allocates the main simulation structure.
 2. Parses and validates the arguments.
-3. Allocates coder, dongle, and request storage.
+3. Allocates coder and dongle arrays.
 4. Initializes mutexes and condition variables.
 5. Initializes every coder and dongle.
 6. Creates the coder threads.
@@ -196,13 +196,13 @@ Waiting coders are registered in a per-dongle queue. The selected coder is deter
 - EDF prioritizes the earliest burnout deadline.
 - EDF ties are resolved using coder ID.
 
-This gives waiting coders a deterministic arbitration rule rather than allowing arbitrary thread scheduling to decide who receives a dongle.
+This gives waiting coders a deterministic arbitration rule when two coders are queued on the same dongle. If a dongle is already free and uncontested, the first coder to reach it takes it immediately without entering the scheduler queue.
 
 ### Cooldown handling
 
 A released dongle records its release timestamp. A new owner cannot immediately reuse it while the configured `dongle_cooldown` interval is active.
 
-The waiting coder temporarily releases the dongle mutex while waiting for the cooldown to expire, allowing other threads to inspect the dongle and continue making progress.
+While waiting, the coder releases the dongle mutex, sleeps briefly, and re-locks it on each iteration. Cooldown is checked inside the same loop as availability and queue position, so a dongle cannot be taken before its cooldown expires.
 
 ### Precise burnout detection
 
@@ -220,7 +220,7 @@ The shared coder state is protected by `sim_lock` while it is inspected.
 
 When the monitor detects burnout or completion, it sets the shared `running` state to false while holding `sim_lock`.
 
-It then broadcasts on the dongle condition variables so coders sleeping while waiting for resources wake immediately and can observe that the simulation has ended.
+It then broadcasts on the per-dongle condition variables. Coders blocked in `wait_for_dongle()` also re-check `sim_is_running()` on every polling iteration, so they exit quickly after shutdown.
 
 The same stop state is checked by the coder loop and by the interruptible sleep helper, preventing threads from continuing unnecessary work after termination.
 
@@ -277,22 +277,30 @@ The monitor uses the same mutex when reading the timestamp. This establishes a s
 
 Condition variables allow threads to sleep until a shared condition changes instead of continuously polling.
 
-For dongle acquisition, a coder waits while the dongle is unavailable or another coder has scheduling priority:
+During startup, coder and monitor threads wait on `start_cond` until the main thread releases the start barrier:
 
 ```c
-while ((!dongle->available ||
-        dongle->queue[0].coder_id != coder->id) &&
-       sim_is_running(coder->sim))
+while (!sim->start_released && !sim->start_aborted)
+    pthread_cond_wait(&sim->start_cond, &sim->start_lock);
+```
+
+For dongle acquisition, waiting uses a mutex-protected polling loop. The coder re-checks availability, queue position, and cooldown on each iteration:
+
+```c
+while (sim_is_running(sim))
 {
-    pthread_cond_wait(&dongle->cond, &dongle->lock);
+    if (dongle->available
+        && dongle->queue[0].coder_id == coder->id
+        && current_time_ms() - dongle->timestamp
+            >= sim->config.dongle_cooldown)
+        break ;
+    pthread_mutex_unlock(&dongle->lock);
+    usleep(100);
+    pthread_mutex_lock(&dongle->lock);
 }
 ```
 
-The condition is checked in a `while` loop so that a spurious wake-up cannot cause a coder to acquire a dongle incorrectly.
-
-When a dongle is released, the owner broadcasts on its condition variable. Waiting coders wake, reacquire the mutex, and re-evaluate the condition.
-
-The same mechanism is used during startup: coder and monitor threads wait on `start_cond` until the main thread releases the start barrier.
+Each dongle still owns a condition variable. It is broadcast when the dongle is released and when the simulation stops, but the current wait loop relies on brief sleeps between re-checks rather than `pthread_cond_wait()`.
 
 ### Start barrier and thread-safe communication
 
@@ -308,8 +316,8 @@ The monitor communicates termination through shared state and condition-variable
 
 1. The monitor detects burnout or completion.
 2. It updates `running` while holding `sim_lock`.
-3. It broadcasts to coders waiting on dongle conditions.
-4. Woken coders re-check `sim_is_running()`.
+3. It broadcasts on each dongle condition variable.
+4. Coders in `wait_for_dongle()`, `sleep_with_stop()`, or the main coder loop re-check `sim_is_running()` or `coder_should_continue()`.
 5. Their loops terminate without continuing the simulation.
 
 This avoids leaving threads blocked indefinitely after the simulation has ended.
@@ -334,21 +342,16 @@ The waiting coder with the smallest deadline has priority.
 
 When deadlines are equal, the smaller coder ID wins. This makes the scheduler deterministic.
 
-### Priority queue
+### Per-dongle waiting queue
 
-The scheduler uses a priority queue to manage coders waiting for dongles.
+Each dongle keeps a small waiting queue with room for at most two coders. In a ring of N coders, a given dongle can be needed by at most its two neighbors, so a fixed two-slot queue is enough.
 
-For FIFO, coders are ordered according to when they entered the waiting queue.
+When a second coder joins the queue, the implementation reorders the two entries according to the active policy:
 
-For EDF (Earliest Deadline First), coders are ordered according to their burnout deadline:
+- **FIFO:** swap if the earlier arrival time is not already at the front.
+- **EDF:** swap if the earlier deadline is not already at the front; equal deadlines break on smaller coder ID.
 
-```text
-deadline = last_compile_start + time_to_burnout
-```
-
-The coder with the earliest deadline is given priority. When two coders have the same deadline, their coder ID is used as a tie-breaker.
-
-The scheduling logic is implemented in `scheduler_queue.c`.
+Only the coder at `queue[0]` may take the dongle once it is available and its cooldown has expired. The scheduling logic is implemented in `scheduler_queue.c`.
 
 ## Timing
 
@@ -378,7 +381,6 @@ The monitor checks the state of the simulation every 2 milliseconds, allowing it
 - [The Dining Philosophers in C: threads, race conditions and deadlocks](https://www.youtube.com/watch?v=zOpzGHwJ3MU)
 - [Philosophers, 42 School Project. Dining Philosophers Project. C Implementation](https://www.youtube.com/watch?v=UGQsvVKwe90)
 - [Earliest Deadline First — Wikipedia](https://en.wikipedia.org/wiki/Earliest_deadline_first_scheduling)
-- [Priority queue / Binary heap — Wikipedia](https://en.wikipedia.org/wiki/Binary_heap)
 
 ## AI usage
 
