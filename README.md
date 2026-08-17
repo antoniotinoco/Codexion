@@ -130,6 +130,27 @@ timestamp_in_ms coder_id message
 
 The timestamp is the elapsed time in milliseconds since the simulation started.
 
+### Test file
+
+The project includes a `test.py` script with a collection of automated tests covering different scenarios, including:
+
+- Invalid arguments
+- Single, two, three, and twenty coders
+- Impossible configurations
+- Dongle cooldown scenarios
+- Stress tests
+- Large thread counts
+- Thread creation failures
+- Graceful error handling
+
+The test suite is also useful if you want to experiment with different configurations or add your own test cases. To run it:
+
+```bash
+python3 test.py
+```
+
+Make sure the Codexion executable has been built before running the test suite.
+
 ## Simulation lifecycle
 
 At startup, the program:

@@ -12,50 +12,6 @@
 
 #include "codexion.h"
 
-/*
-static int	sched_debug_enabled(void)
-{
-	static int	cached = -1;
-
-	if (cached == -1)
-		cached = (getenv("CODEXION_DEBUG") != NULL);
-	return (cached);
-} */
-
-/* CODEXION_DEBUG=1 ./codexion 5 3000 200 200 200 3 800 edf 2>debug.txt
-static void	log_sched_decision(t_dongle *dongle, t_sim *sim)
-{
-	long long	elapsed;
-	long long	start_ms;
-
-	if (!sched_debug_enabled() || dongle->queue_size != 2)
-		return ;
-	pthread_mutex_lock(&sim->log_lock);
-	pthread_mutex_lock(&sim->sim_lock);
-	start_ms = sim->start_time_ms;
-	elapsed = current_time_ms() - start_ms;
-	pthread_mutex_unlock(&sim->sim_lock);
-	if (sim->config.scheduler == SCHED_POLICY_FIFO)
-		fprintf(stderr,
-			"%lld [sched:fifo] dongle %d: serving coder %d (arrival %lld)"
-			" over coder %d (arrival %lld)\n",
-			elapsed, dongle->id,
-			dongle->queue[0].coder_id,
-			dongle->queue[0].arrival_time - start_ms,
-			dongle->queue[1].coder_id,
-			dongle->queue[1].arrival_time - start_ms);
-	else
-		fprintf(stderr,
-			"%lld [sched:edf]  dongle %d: serving coder %d (deadline %lld)"
-			" over coder %d (deadline %lld)\n",
-			elapsed, dongle->id,
-			dongle->queue[0].coder_id,
-			dongle->queue[0].deadline - start_ms,
-			dongle->queue[1].coder_id,
-			dongle->queue[1].deadline - start_ms);
-	pthread_mutex_unlock(&sim->log_lock);
-} */
-
 /* Insert a waiting coder according to FIFO ordering. */
 static void	enqueue_fifo(t_dongle *dongle, t_coder *coder)
 {
@@ -102,7 +58,6 @@ static void	enqueue_edf(t_dongle *dongle, t_coder *coder)
 }
 
 /* Insert one waiting coder into this dongle's queue. */
-/* log_sched_decision(dongle, coder->sim); */
 void	enqueue(t_dongle *dongle, t_coder *coder)
 {
 	if (coder->sim->config.scheduler == SCHED_POLICY_FIFO)
